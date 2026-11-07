@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>DIT Memories</title>
+<style>
+  :root { --bg:#101a33; --panel:#18264a; --paper:#f7f5ef; --flash:#ffd23f; --muted:#9fb0d6; --ok:#6ee7a8; --bad:#ff8a80; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; min-height:100%; background:var(--bg); color:var(--paper); font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif; }
+  main { max-width:480px; margin:0 auto; min-height:100vh; padding:28px 20px calc(28px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; align-items:center; text-align:center; gap:18px; }
+  h1 { font-family:Georgia,"Times New Roman",serif; font-size:2.2rem; font-weight:700; margin:8px 0 0; }
+  p.sub { margin:0; color:var(--muted); line-height:1.5; }
+  .name { width:100%; padding:12px 14px; border-radius:12px; border:1px solid #2c3d6e; background:var(--panel); color:var(--paper); font-size:1rem; }
+  .name::placeholder { color:var(--muted); }
+  .shutter { width:168px; height:168px; border-radius:50%; border:8px solid var(--paper); background:var(--flash); color:var(--bg); font-size:1.15rem; font-weight:700; display:grid; place-items:center; cursor:pointer; box-shadow:0 0 0 8px var(--panel); margin:12px 0; }
+  .shutter:active { transform:scale(.96); }
+  .link { background:none; border:none; color:var(--muted); font-size:.95rem; text-decoration:underline; cursor:pointer; padding:6px; }
+  .frame { background:var(--paper); padding:12px 12px 40px; border-radius:4px; width:100%; transform:rotate(-1.5deg); box-shadow:0 10px 30px rgba(0,0,0,.4); }
+  .frame img { width:100%; display:block; max-height:56vh; object-fit:cover; }
+  .row { display:flex; gap:12px; width:100%; }
+  .btn { flex:1; padding:15px; border-radius:12px; border:2px solid var(--paper); background:transparent; color:var(--paper); font-size:1.05rem; font-weight:700; cursor:pointer; }
+  .btn.primary { background:var(--flash); border-color:var(--flash); color:var(--bg); }
+  .btn:disabled { opacity:.6; }
+  .status { min-height:1.4em; font-weight:700; }
+  .status.ok { color:var(--ok); }
+  .status.bad { color:var(--bad); }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>DIT Memories</h1>
+  <p class="sub" id="intro">Take a photo and it joins everyone else's in the shared album.</p>
+
+  <section id="capture" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:6px">
+    <input class="name" id="name" type="text" maxlength="30" placeholder="Your name (optional)" autocomplete="given-name">
+    <label class="shutter" for="cam">Take photo</label>
+    <input id="cam" type="file" accept="image/*" capture="environment" class="hidden">
+    <button class="link" id="flip" type="button">Use selfie camera</button>
+    <label class="link" for="gal">Or choose from gallery</label>
+    <input id="gal" type="file" accept="image/*" class="hidden">
+  </section>
+
+  <section id="preview" class="hidden" style="width:100%;display:flex;flex-direction:column;align-items:center;gap:18px">
+    <div class="frame"><img id="img" alt="Your photo preview"></div>
+    <div class="row">
+      <button class="btn" id="retake" type="button">Retake</button>
+      <button class="btn primary" id="save" type="button">Save to memories</button>
+    </div>
+  </section>
+
+  <div class="status" id="status" role="status" aria-live="polite"></div>
+</main>
+
+<script>
+  const UPLOAD_URL = "https://script.google.com/macros/s/AKfycbwhDxuYfr4C0SJhJ5osf_6ehh-I7CtMny0WoX8f-RGGxrFY9HYY-OyCKv7KD2EzMl5l/exec";
+
+  const $ = (id) => document.getElementById(id);
+  const capture = $("capture"), preview = $("preview"), img = $("img"), status = $("status");
+  let blobToSend = null;
+
+  function setStatus(msg, kind) { status.textContent = msg; status.className = "status " + (kind || ""); }
+  function show(step) {
+    const p = step === "preview";
+    capture.classList.toggle("hidden", p);
+    preview.classList.toggle("hidden", !p);
+    $("intro").classList.toggle("hidden", p);
+  }
+
+  function shrink(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const i = new Image();
+      i.onload = () => {
+        const max = 1600, scale = Math.min(1, max / Math.max(i.width, i.height));
+        const c = document.createElement("canvas");
+        c.width = Math.round(i.width * scale); c.height = Math.round(i.height * scale);
+        c.getContext("2d").drawImage(i, 0, 0, c.width, c.height);
+        URL.revokeObjectURL(url);
+        c.toBlob((b) => b ? resolve(b) : reject(new Error("fail")), "image/jpeg", 0.85);
+      };
+      i.onerror = () => reject(new Error("fail"));
+      i.src = url;
+    });
+  }
+
+  async function onPick(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    setStatus("Preparing photo...");
+    try {
+      blobToSend = await shrink(file);
+      img.src = URL.createObjectURL(blobToSend);
+      setStatus("");
+      show("preview");
+    } catch (err) {
+      setStatus("That photo couldn't be opened. Try another one.", "bad");
+    }
+  }
+  $("cam").addEventListener("change", onPick);
+  $("gal").addEventListener("change", onPick);
+
+  $("flip").addEventListener("click", () => {
+    const cam = $("cam");
+    const selfie = cam.getAttribute("capture") === "user";
+    cam.setAttribute("capture", selfie ? "environment" : "user");
+    $("flip").textContent = selfie ? "Use selfie camera" : "Use back camera";
+  });
+
+  $("retake").addEventListener("click", () => { blobToSend = null; setStatus(""); show("capture"); });
+
+  function toBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(String(r.result).split(",")[1]);
+      r.onerror = () => reject(new Error("read failed"));
+      r.readAsDataURL(blob);
+    });
+  }
+
+  $("save").addEventListener("click", async () => {
+    if (!blobToSend) return;
+    const btn = $("save");
+    btn.disabled = true; $("retake").disabled = true;
+    setStatus("Saving your memory...");
+    try {
+      const image = await toBase64(blobToSend);
+      const res = await fetch(UPLOAD_URL, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({ image, name: $("name").value })
+      });
+      const out = await res.json();
+      if (!out.ok) throw new Error(out.error || "Upload failed");
+      blobToSend = null;
+      show("capture");
+      setStatus("Saved to DIT Memories! Take another?", "ok");
+    } catch (err) {
+      setStatus("Couldn't save. Check your connection and tap Save again.", "bad");
+    } finally {
+      btn.disabled = false; $("retake").disabled = false;
+    }
+  });
+</script>
+</body>
+</html>
